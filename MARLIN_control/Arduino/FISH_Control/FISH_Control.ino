@@ -77,6 +77,10 @@ void loop() {
               digitalWrite(valvepin, HIGH);
             }                       
           }
+         if (cmd == '5' and state.length() == 1)
+          {
+            Serial.print("MARLIN");
+          }
     }
     else
     {
