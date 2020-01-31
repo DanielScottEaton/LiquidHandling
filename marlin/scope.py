@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import matplotlib
 import MMCorePy
 from IPython.display import clear_output
@@ -7,7 +8,7 @@ import time
 
 import h5py
 
-class scope:
+class scopeCore:
     def __init__(self,configpath,logpath,camera_name="BSI Prime",shutter_name="SpectraIII",xystage_name="XYStage",focus_name="ZDrive"):
         self.mmc = MMCorePy.CMMCore()
         self.mmc.loadSystemConfiguration(configpath)
@@ -35,10 +36,10 @@ class scope:
         plt.imshow(im1, interpolation='None',vmin=low,vmax=high)
         plt.show()
         
-    def liveview(img_size=(12,12),low=None,high=None):#W,interval=0.5):
+    def liveview(self,img_size=(12,12),low=None,high=None):#W,interval=0.5):
         while True:
             try:
-                while self.mmc.deviceBusy(camera):
+                while self.mmc.deviceBusy(self.camera_name):
                     time.sleep(0.005)
                     
                 im1 = self.snap_image()
@@ -51,7 +52,7 @@ class scope:
                 plt.show()
             except KeyboardInterrupt:
                 break
-        while self.mmc.deviceBusy(camera):
+        while self.mmc.deviceBusy(self.camera_name):
             time.sleep(0.01)
             
     def set_grid(self,num_col,num_row,col_step=333.,row_step=686.):
@@ -102,27 +103,27 @@ class scope:
         imgs = []
         imgs_metadata = []
 
-        for fov_num,(x_coord,y_coord) in enumerate(test_grid):
+        for fov_num,(x_coord,y_coord) in enumerate(grid_coords):
             while self.mmc.deviceBusy(self.xystage_name):
                 time.sleep(0.1)
                 pass
             self.mmc.setXYPosition(x_coord,y_coord)                
             
             for config in config_list:
-                while mmc.systemBusy():
+                while self.mmc.systemBusy():
                     time.sleep(0.1)
                     pass
                 self.mmc.setConfig(group_name,config)
                 
-                ### put write here because it is likely the slow step ###
+#                 ### put write here because it is likely the slow step ###
                 
-                for img_num in range(len(imgs)):
-                    img = imgs[img_num]
-                    metadata_entry = imgs_metadata[img_num]
+#                 for img_num in range(len(imgs)):
+#                     img = imgs[img_num]
+#                     metadata_entry = imgs_metadata[img_num]
                     
-                    with h5py.File(output_folder + "fov=" + str(metadata_entry["fov"]) + "_config=" + str(metadata_entry["config"]) + "_t=" + str(timepoint),"w") as h5pyfile:
-                        hdf5_dataset = h5pyfile.create_dataset("data",(y_dim,x_dim), chunks=(128,128), dtype='uint16')
-                        hdf5_dataset[:,:] = img
+#                     with h5py.File(output_folder + "fov=" + str(metadata_entry["fov"]) + "_config=" + str(metadata_entry["config"]) + "_t=" + str(timepoint),"w") as h5pyfile:
+#                         hdf5_dataset = h5pyfile.create_dataset("data", data=img, chunks=(128,128), dtype='uint16')
+#                         all_metadata.append(metadata_entry)
                     
                 while self.mmc.systemBusy():
                     time.sleep(0.1)
@@ -135,7 +136,7 @@ class scope:
                 read_z_coord = self.mmc.getPosition(self.focus_name)
                 current_time = time.time()-t_start
                 
-                metadata_entry = {"fov":fov_num,"config":config,"x":read_x_coord,"y",read_y_coord,"z":read_z_coord,"t":current_time}
+                metadata_entry = {"fov":fov_num,"config":config,"x":read_x_coord,"y":read_y_coord,"z":read_z_coord,"t":current_time}
                 img = self.mmc.getImage()
                 
                 imgs.append(img)
@@ -146,6 +147,7 @@ class scope:
             metadata_entry = imgs_metadata[img_num]
 
             with h5py.File(output_folder + "fov=" + str(metadata_entry["fov"]) + "_config=" + str(metadata_entry["config"]) + "_t=" + str(timepoint),"w") as h5pyfile:
-                hdf5_dataset = h5pyfile.create_dataset("data",(y_dim,x_dim), chunks=(128,128), dtype='uint16')
-                hdf5_dataset[:,:] = img
-                hdf5_dataset.attrs['metadata'] = metadata_entry
+                hdf5_dataset = h5pyfile.create_dataset("data", data=img, chunks=(128,128), dtype='uint16')
+        
+        metadata = pd.DataFrame.from_dict(imgs_metadata)
+        metadata.to_hdf(output_folder + 'metadata.hdf5', key='data', mode='w')

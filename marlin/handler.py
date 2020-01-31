@@ -3,7 +3,7 @@ import serial.tools.list_ports
 import time
 from time import sleep
 
-class handler:
+class handlerCore:
     def __init__(self,handshakes=2):
         self.valvestate = 0
         self.pumpstate = 0
