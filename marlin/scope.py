@@ -102,6 +102,9 @@ class scopeCore:
                 
         imgs = []
         imgs_metadata = []
+        
+        x_coord,y_coord = grid_coords[0]
+        self.mmc.setXYPosition(x_coord,y_coord)
 
         for fov_num,(x_coord,y_coord) in enumerate(grid_coords):
             while self.mmc.deviceBusy(self.xystage_name):
@@ -141,6 +144,9 @@ class scopeCore:
                 
                 imgs.append(img)
                 imgs_metadata.append(metadata_entry)
+                
+        x_coord,y_coord = grid_coords[0]
+        self.mmc.setXYPosition(x_coord,y_coord)
                 
         for img_num in range(len(imgs)):
             img = imgs[img_num]
