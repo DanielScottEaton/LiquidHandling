@@ -156,4 +156,4 @@ class scopeCore:
                 hdf5_dataset = h5pyfile.create_dataset("data", data=img, chunks=(128,128), dtype='uint16')
         
         metadata = pd.DataFrame.from_dict(imgs_metadata)
-        metadata.to_hdf(output_folder + 'metadata.hdf5', key='data', mode='w')
+        metadata.to_hdf(output_folder + 'metadata_' + str(timepoint) + '.hdf5', key='data', mode='w')
