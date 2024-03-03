@@ -2,9 +2,10 @@ import serial
 import serial.tools.list_ports
 import time
 from time import sleep
+from .scheduler import wait_for
 
 class handlerCore:
-    def __init__(self,handshakes=2):
+    def __init__(self,handshakes=2,default_state="PFA(half-MeAc)"):
         self.valvestate = 0
         self.pumpstate = 0
         self.titanxstates = [0 for i in range(5)]
@@ -19,6 +20,13 @@ class handlerCore:
                         "Probe 22" : [0,1,12,12,0],"Probe 23" : [0,1,1,1,0],"Probe 24" : [0,1,1,2,0],\
                         "SSC" : [0,1,1,8,0],"PFA(half-MeAc)" : [0,1,1,9,0],"EtOH(MeAc)" : [0,1,1,10,0],"Image" : [0,1,1,11,0],\
                         "Cleave" : [0,1,1,12,0]}
+        self.titanx_states_inv = {tuple(val):key for key,val in self.titanx_states.items()}
+        self.stage_valve_state_dict = {0:'Stage',1:'Waste'}
+        
+        self.connect()
+        self.set_valve_state(default_state,0)
+        self.set_pump_state(0)
+        print("Handler Ready.")
         
     def get_heartbeat(self,comport,connect_code="MARLIN",timeout=10.):
         try:
@@ -78,6 +86,15 @@ class handlerCore:
         self.pumpstate = pumpstate
         self.titanxstates = titanxstates
         
+        valve_name_str = self.titanx_states_inv[tuple(titanxstates)]
+        stage_valve_state_str = self.stage_valve_state_dict[valvestate]
+        pump_state_voltage = 5.*(float(pumpstate)/4095.)
+        pump_state_string = str(pump_state_voltage)
+        pump_state_perc = str(int((pump_state_voltage/5.)*100))
+
+        print valve_name_str + " flowing to " + stage_valve_state_str + " at " + pump_state_string + " Volts (" + pump_state_perc + "%)"
+        
+        
     def sendstate(self,valvestate,pumpstate,titanxstates):
         
         self.updatestate(valvestate,pumpstate,titanxstates)
@@ -112,18 +129,31 @@ class handlerCore:
             self.serial_handle.reset_output_buffer()
             self.serial_handle.reset_input_buffer()
             checkstr = "[" + ",".join([str(state) for state in self.titanxstates]) + "];" + str(self.valvestate) + ";" + str(self.pumpstate)
-
-            print returnedstr.strip()
+            returned_state_string = returnedstr.strip()
             
-            if returnedstr.strip() == checkstr.strip():
+            if returned_state_string == checkstr:
                 no_handshake = False
             handshake_attempts += 1
             if handshake_attempts >= self.handshakes:
                 raise Exception("Handshake failed.")
-
+            
     def set_valve_state(self,titanx_state_name,valvestate):
         titanxstates = self.titanx_states[titanx_state_name]
         self.sendstate(valvestate,self.pumpstate,titanxstates)
     
     def set_pump_state(self,pumpstate):
         self.sendstate(self.valvestate,pumpstate,self.titanxstates)
+        
+    def clean(self,time_per_line=90,pump_speed=2000):
+        self.set_pump_state(0)
+        self.set_valve_state("Image",1)
+        self.set_pump_state(pump_speed)
+        wait_for(5*60)
+        self.set_pump_state(0)
+        self.set_valve_state("Image",0)
+        for state_name,_ in self.titanx_states.items():
+            self.set_pump_state(0)
+            self.set_valve_state(state_name,0)
+            self.set_pump_state(pump_speed)
+            wait_for(time_per_line)
+        self.set_pump_state(0)

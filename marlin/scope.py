@@ -3,13 +3,40 @@ import pandas as pd
 import matplotlib
 import MMCorePy
 from IPython.display import clear_output
+from time import sleep
 import matplotlib.pyplot as plt
 import time
 
 import h5py
 
+def fetch_multipoints(multipoints_path,scaling=1000.):
+    with open(multipoints_path,"r") as infile:
+        coords = infile.read()
+    coords = coords.split("\n")[:-1]
+    coords = [tuple(float(item)*scaling for item in coord.split(";")) for coord in coords]
+
+    return coords
+
+def check_grid_corners(scopeInstance,xy_grid,shift_tol=100,wait_time=0):
+    xy_grid_arr = np.array(xy_grid)
+    
+    max_x,min_x = np.max(xy_grid_arr[:,0]),np.min(xy_grid_arr[:,0])
+    max_y,min_y = np.max(xy_grid_arr[:,1]),np.min(xy_grid_arr[:,1])
+
+    first_col_mask,last_col_mask = xy_grid_arr[:,0]>(max_x-shift_tol),xy_grid_arr[:,0]<(min_x+shift_tol)
+    last_row_mask,first_row_mask = xy_grid_arr[:,1]>(max_y-shift_tol),xy_grid_arr[:,1]<(min_y+shift_tol) #inverted coords
+
+    top_left = xy_grid_arr[first_col_mask&first_row_mask][0]
+    top_right = xy_grid_arr[last_col_mask&first_row_mask][0]
+    bottom_left = xy_grid_arr[first_col_mask&last_row_mask][0]
+    bottom_right = xy_grid_arr[last_col_mask&last_row_mask][0]
+    
+    for selected_point in [top_left,top_right,bottom_right,bottom_left,top_left]:
+        scopeInstance.mmc.setXYPosition(selected_point[0],selected_point[1])
+        sleep(wait_time)
+
 class scopeCore:
-    def __init__(self,configpath,logpath,camera_name="BSI Prime",shutter_name="SpectraIII",xystage_name="XYStage",focus_name="ZDrive"):
+    def __init__(self,configpath,logpath,camera_name="BSI Prime",shutter_name="SpectraIII",xystage_name="XYStage",focus_name="ZDrive",fish_channel_group="FISH_channels"):
         self.mmc = MMCorePy.CMMCore()
         self.mmc.loadSystemConfiguration(configpath)
         self.mmc.setPrimaryLogFile(logpath)
@@ -19,6 +46,9 @@ class scopeCore:
         self.shutter_name = shutter_name
         self.xystage_name = xystage_name
         self.focus_name = focus_name
+        
+        first_channel_name = self.mmc.getAvailableConfigs(fish_channel_group)[0]
+        self.mmc.setConfig(fish_channel_group,first_channel_name)
     
     def snap_image(self,img_size=(12,12)):
         self.mmc.snapImage()
@@ -33,7 +63,7 @@ class scopeCore:
     def plot_img(self,img,low,high,img_size=(12,12)):
         clear_output(wait = True)
         plt.figure(figsize=img_size)
-        plt.imshow(im1, interpolation='None',vmin=low,vmax=high)
+        plt.imshow(img, interpolation='None',vmin=low,vmax=high)
         plt.show()
         
     def liveview(self,img_size=(12,12),low=None,high=None):#W,interval=0.5):
@@ -116,25 +146,27 @@ class scopeCore:
                 while self.mmc.systemBusy():
                     time.sleep(0.1)
                     pass
+                
                 self.mmc.setConfig(group_name,config)
-                
-#                 ### put write here because it is likely the slow step ###
-                
-#                 for img_num in range(len(imgs)):
-#                     img = imgs[img_num]
-#                     metadata_entry = imgs_metadata[img_num]
-                    
-#                     with h5py.File(output_folder + "fov=" + str(metadata_entry["fov"]) + "_config=" + str(metadata_entry["config"]) + "_t=" + str(timepoint),"w") as h5pyfile:
-#                         hdf5_dataset = h5pyfile.create_dataset("data", data=img, chunks=(128,128), dtype='uint16')
-#                         all_metadata.append(metadata_entry)
                     
                 while self.mmc.systemBusy():
                     time.sleep(0.1)
                     pass
-                self.mmc.setShutterOpen(self.shutter_name,True)
-                self.mmc.snapImage()
-                self.mmc.setShutterOpen(self.shutter_name,False)
                 
+                if "noPFS" not in config:
+                    self.mmc.setProperty("PFS","FocusMaintenance","On")
+                    time.sleep(0.25)
+                    
+                shutter_failed = True
+                while shutter_failed:
+                    try:
+                        self.mmc.setShutterOpen(self.shutter_name,True)
+                        self.mmc.snapImage()
+                        self.mmc.setShutterOpen(self.shutter_name,False)
+                        shutter_failed = False
+                    except:
+                        time.sleep(0.25)
+
                 read_x_coord,read_y_coord = self.mmc.getXYPosition(self.xystage_name)
                 read_z_coord = self.mmc.getPosition(self.focus_name)
                 current_time = time.time()-t_start
@@ -144,7 +176,16 @@ class scopeCore:
                 
                 imgs.append(img)
                 imgs_metadata.append(metadata_entry)
-                
+            while self.mmc.systemBusy():
+                time.sleep(0.1)
+                pass
+            self.mmc.setConfig(group_name,config_list[0])
+            while self.mmc.systemBusy():
+                time.sleep(0.1)
+                pass
+            if "noPFS" not in config_list[0]:
+                self.mmc.setProperty("PFS","FocusMaintenance","On")
+                time.sleep(0.25)
         x_coord,y_coord = grid_coords[0]
         self.mmc.setXYPosition(x_coord,y_coord)
                 
@@ -152,8 +193,8 @@ class scopeCore:
             img = imgs[img_num]
             metadata_entry = imgs_metadata[img_num]
 
-            with h5py.File(output_folder + "fov=" + str(metadata_entry["fov"]) + "_config=" + str(metadata_entry["config"]) + "_t=" + str(timepoint),"w") as h5pyfile:
+            with h5py.File(output_folder + "fov=" + str(metadata_entry["fov"]) + "_config=" + str(metadata_entry["config"]) + "_t=" + str(timepoint) + ".hdf5","w") as h5pyfile:
                 hdf5_dataset = h5pyfile.create_dataset("data", data=img, chunks=(128,128), dtype='uint16')
         
         metadata = pd.DataFrame.from_dict(imgs_metadata)
-        metadata.to_hdf(output_folder + 'metadata_' + str(timepoint) + '.hdf5', key='data', mode='w')
+        metadata.to_hdf(output_folder + "metadata_" + str(timepoint) + ".hdf5", key="data", mode="w")
